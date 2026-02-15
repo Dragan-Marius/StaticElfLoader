@@ -65,8 +65,8 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	for (i = 0; i < (int)elf_magic->e_phnum; i++) {
 		if (phdr_table[i].p_type == PT_LOAD) {
 			/*Calculate page alignment and mapping size*/
-			unsigned long page_nume = ((unsigned long)phdr_table[i].p_vaddr / page_size);
-			unsigned long page_start = (page_nume)*page_size;
+			unsigned long page_num = ((unsigned long)phdr_table[i].p_vaddr / page_size);
+			unsigned long page_start = (page_num)*page_size;
 			unsigned long addr_offset = (unsigned long)phdr_table[i].p_vaddr - page_start;
 			unsigned long total_len = addr_offset + (unsigned long)phdr_table[i].p_memsz;
 			unsigned long mmap_len = ((total_len / page_size) + ((total_len % page_size) != 0)) * page_size;
@@ -89,8 +89,8 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 				perms = perms | PROT_WRITE;
 			if (phdr_table[i].p_flags & PF_X)
 				perms = perms | PROT_EXEC;
-			unsigned long page_nume = ((unsigned long)phdr_table[i].p_vaddr / page_size);
-			unsigned long page_start = (page_nume)*page_size;
+			unsigned long page_num = ((unsigned long)phdr_table[i].p_vaddr / page_size);
+			unsigned long page_start = (page_num)*page_size;
 			unsigned long addr_offset = (unsigned long)phdr_table[i].p_vaddr - page_start;
 			unsigned long total_len = addr_offset + (unsigned long)phdr_table[i].p_memsz;
 			unsigned long mmap_len = ((total_len / page_size) + ((total_len % page_size) != 0)) * page_size;
@@ -104,9 +104,9 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 	if (getrlimit(RLIMIT_STACK, &rlim) == 0)
 		stack_size = rlim.rlim_cur;
-	void *stiva = mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	void *stack= mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-	stiva = (char *)stiva + stack_size;
+	stack= (char *)stack+ stack_size;
 
 	int env_count = 0;
 
@@ -197,29 +197,29 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	auxv[i].a_un.a_val = 0;
 	i++;
 
-	stiva = (char *)stiva - i * sizeof(Elf64_auxv_t);
-	memcpy(stiva, auxv, i * sizeof(Elf64_auxv_t));
+	stack= (char *)stack- i * sizeof(Elf64_auxv_t);
+	memcpy(stack, auxv, i * sizeof(Elf64_auxv_t));
 
 	void *pointer_null = NULL;
 
-	stiva = stiva - sizeof(void *);
-	memcpy(stiva, &pointer_null, sizeof(void *));
+	stack= stack- sizeof(void *);
+	memcpy(stack, &pointer_null, sizeof(void *));
 
 	for (i = env_count - 1; i >= 0; i--) {
-		stiva = (char *)stiva - sizeof(char *);
-		memcpy(stiva, &envp[i], sizeof(char *));
+		stack= (char *)stack- sizeof(char *);
+		memcpy(stack, &envp[i], sizeof(char *));
 	}
 
-	stiva = stiva - sizeof(void *);
-	memcpy(stiva, &pointer_null, sizeof(void *));
+	stack= stack- sizeof(void *);
+	memcpy(stack, &pointer_null, sizeof(void *));
 	for (i = argc - 1; i >= 0; i--) {
-		stiva = (char *)stiva - sizeof(char *);
-		memcpy(stiva, &argv[i], sizeof(char *));
+		stack= (char *)stack- sizeof(char *);
+		memcpy(stack, &argv[i], sizeof(char *));
 	}
 
-	stiva = (char *)stiva - sizeof(int *);
-	memcpy(stiva, &argc, sizeof(int *));
-	void *sp = stiva;
+	stack= (char *)stack- sizeof(int *);
+	memcpy(stack, &argc, sizeof(int *));
+	void *sp = stack;
 
 	void (*entry)() = (void (*)(void))elf_magic->e_entry;
 
