@@ -13,10 +13,10 @@
 #include <stdint.h>
 #include <sys/resource.h>
 #include <sys/random.h>
-// #include <math.h>
+
+/*Function to map the ELF file into memory for initial parsing*/
 void *map_elf(const char *filename)
 {
-	// This part helps you store the content of the ELF file inside the buffer.
 	struct stat st;
 	void *file;
 	int fd;
@@ -41,16 +41,8 @@ void *map_elf(const char *filename)
 
 void load_and_run(const char *filename, int argc, char **argv, char **envp)
 {
-	// Contents of the ELF file are in the buffer: elf_contents[x] is the x-th byte of the ELF file.
 	void *elf_contents = map_elf(filename);
-
-	/**
-	 * TODO: ELF Header Validation
-	 * Validate ELF magic bytes - "Not a valid ELF file" + exit code 3 if invalid.
-	 * Validate ELF class is 64-bit (ELFCLASS64) - "Not a 64-bit ELF" + exit code 4 if invalid.
-	 */
-	// char *str = (char *)elf_contents;
-	// int i;
+	/*ELF Header Validation*/
 	Elf64_Ehdr *elf_magic = (Elf64_Ehdr *)elf_contents;
 	int i;
 
@@ -64,91 +56,63 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 		fprintf(stderr, "Not a 64-bit ELF\n");
 		exit(4);
 	}
-	/**
-	 * TODO: Load PT_LOAD segments
-	 * For minimal syscall-only binaries.
-	 * For each PT_LOAD segment:
-	 * - Map the segments in memory. Permissions can be RWX for now.
-	 */
 
-	char *adresa_inceput_elf = (char *)elf_contents + elf_magic->e_phoff;
-	Elf64_Phdr *phdr_load = (Elf64_Phdr *)adresa_inceput_elf;
-	long dimensiunea_paginii = sysconf(_SC_PAGESIZE);
+	/*Process Program Headers and Map PT_LOAD Segments*/
+	char *elf_address = (char *)elf_contents + elf_magic->e_phoff;
+	Elf64_Phdr *phdr_table = (Elf64_Phdr *)elf_address;
+	long page_size = sysconf(_SC_PAGESIZE);
 
 	for (i = 0; i < (int)elf_magic->e_phnum; i++) {
-		if (phdr_load[i].p_type == PT_LOAD) {
-			//in a cata pagina se afla phdr_load[i]
-			unsigned long numarul_paginii = ((unsigned long)phdr_load[i].p_vaddr / dimensiunea_paginii);
-			//de la ce adresa incepe pagina
-			unsigned long start_index_pagina = (numarul_paginii)*dimensiunea_paginii;
-			//diferenta de unde se afla phdr_load[i] si inceputul paginii
-			unsigned long index_adresa = (unsigned long)phdr_load[i].p_vaddr - start_index_pagina;
-			//lungimea zonei de la inceputul paginii pana la sfarsitul zonei de memorie phdr_load[i]
-			unsigned long lungimea_zonei = index_adresa + (unsigned long)phdr_load[i].p_memsz;
-			//gasim cel mai mic multiplu de dimensiune pagina care sa cuprinda lungimea zonei
-			unsigned long lungime_mmap = ((lungimea_zonei / dimensiunea_paginii) + ((lungimea_zonei % dimensiunea_paginii) != 0)) * dimensiunea_paginii;
-			void *phdr_mmap = mmap((void *)start_index_pagina, lungime_mmap, PROT_READ | PROT_EXEC | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-			//pornin de la zona de unde am alocat memorie si o transformam intr un pointer valid
-			char *destinatie = (char *)phdr_mmap + index_adresa;
-			//de unde incep datele pentru phdr_load[i] in ELF
-			char *sursa = (char *)elf_contents + phdr_load[i].p_offset;
-
-			memcpy((void *)destinatie, (void *)sursa, phdr_load[i].p_filesz);
-		}
-	}
-	/**
-	 * TODO: Load Memory Regions with Correct Permissions
-	 * For each PT_LOAD segment:
-	 *	- Set memory permissions according to program header p_flags (PF_R, PF_W, PF_X).
-	 *	- Use mprotect() or map with the correct permissions directly using mmap().
-	 */
-	for (i = 0; i < (int)elf_magic->e_phnum; i++) {
-		if (phdr_load[i].p_type == PT_LOAD) {
-			int permisiuni = 0;
-
-			if (phdr_load[i].p_flags & PF_R)
-				permisiuni = permisiuni | PROT_READ;
-			if (phdr_load[i].p_flags & PF_W)
-				permisiuni = permisiuni | PROT_WRITE;
-			if (phdr_load[i].p_flags & PF_X)
-				permisiuni = permisiuni | PROT_EXEC;
-			unsigned long numarul_paginii = ((unsigned long)phdr_load[i].p_vaddr / dimensiunea_paginii);
-			unsigned long start_index_pagina = (numarul_paginii)*dimensiunea_paginii;
-			unsigned long index_adresa = (unsigned long)phdr_load[i].p_vaddr - start_index_pagina;
-			unsigned long lungimea_zonei = index_adresa + (unsigned long)phdr_load[i].p_memsz;
-			unsigned long lungime_mmap = ((lungimea_zonei / dimensiunea_paginii) + ((lungimea_zonei % dimensiunea_paginii) != 0)) * dimensiunea_paginii;
-
-			mprotect((void *)start_index_pagina, lungime_mmap, permisiuni);
-			// void * phdr_mmap=mmap((void*)start_index_pagina,lungime_mmap,PROT_READ|PROT_EXEC|PROT_WRITE,MAP_FIXED|MAP_PRIVATE|MAP_ANONYMOUS,-1,0);
-			// char * destinatie=(char*)phdr_mmap+index_adresa;
-			// char * sursa=(char*)elf_contents+phdr_load[i].p_offset;
-			// void * copiere=mempcpy((void*)destinatie,(void *)sursa,phdr_load[i].p_memsz);
+		if (phdr_table[i].p_type == PT_LOAD) {
+			/*Calculate page alignment and mapping size*/
+			unsigned long page_nume = ((unsigned long)phdr_table[i].p_vaddr / page_size);
+			unsigned long page_start = (page_nume)*page_size;
+			unsigned long addr_offset = (unsigned long)phdr_table[i].p_vaddr - page_start;
+			unsigned long total_len = addr_offset + (unsigned long)phdr_table[i].p_memsz;
+			unsigned long mmap_len = ((total_len / page_size) + ((total_len % page_size) != 0)) * page_size;
+			/*Map memory with broad permission initially for data copying*/
+			void *segment_mmap = mmap((void *)page_start, mmap_len, PROT_READ | PROT_EXEC | PROT_WRITE, MAP_FIXED | MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+			char *dest = (char *)segment_mmap + addr_offset;
+			char *src = (char *)elf_contents + phdr_table[i].p_offset;
+			/*Copy content from file to virtual memory*/
+			memcpy((void *)dest, (void *)src, phdr_table[i].p_filesz);
 		}
 	}
 
-	/**
-	 * TODO: Support Static Non-PIE Binaries with libc
-	 * Must set up a valid process stack, including:
-	 *	- argc, argv, envp
-	 *	- auxv vector (with entries like AT_PHDR, AT_PHENT, AT_PHNUM, etc.)
-	 * Note: Beware of the AT_RANDOM, AT_PHDR entries, the application will crash if you do not set them up properly.
-	 *
-	 */
+	for (i = 0; i < (int)elf_magic->e_phnum; i++) {
+		if (phdr_table[i].p_type == PT_LOAD) {
+			int perms = 0;
+			/*Apply Fine-grained Memory Permissions*/
+			if (phdr_table[i].p_flags & PF_R)
+				perms = perms | PROT_READ;
+			if (phdr_table[i].p_flags & PF_W)
+				perms = perms | PROT_WRITE;
+			if (phdr_table[i].p_flags & PF_X)
+				perms = perms | PROT_EXEC;
+			unsigned long page_nume = ((unsigned long)phdr_table[i].p_vaddr / page_size);
+			unsigned long page_start = (page_nume)*page_size;
+			unsigned long addr_offset = (unsigned long)phdr_table[i].p_vaddr - page_start;
+			unsigned long total_len = addr_offset + (unsigned long)phdr_table[i].p_memsz;
+			unsigned long mmap_len = ((total_len / page_size) + ((total_len % page_size) != 0)) * page_size;
 
-	struct rlimit limite_resurse;
-	unsigned long dimensiune_stiva = 0;
+			mprotect((void *)page_start, mmap_len, perms);
+		}
+	}
+	/*Prepare Process stack(argc,argv,envp,auxv)*/
+	struct rlimit rlim;
+	unsigned long stack_size = 0;
 
-	if (getrlimit(RLIMIT_STACK, &limite_resurse) == 0)
-		dimensiune_stiva = limite_resurse.rlim_cur;
-	void *stiva = mmap(NULL, dimensiune_stiva, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (getrlimit(RLIMIT_STACK, &rlim) == 0)
+		stack_size = rlim.rlim_cur;
+	void *stiva = mmap(NULL, stack_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
-	stiva = (char *)stiva + dimensiune_stiva;
+	stiva = (char *)stiva + stack_size;
 
 	int env_count = 0;
 
 	for (; envp[env_count] != NULL; env_count++)
 		;
-
+	/*Construct Auxiliary Vector(auxv)*/
 	Elf64_auxv_t auxv[16];
 
 	i = 0;
@@ -162,10 +126,10 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 
 	auxv[i].a_type = AT_PHDR;
 	int j;
-
+	/*Find PT_PHDR for the auxiliary vector*/
 	for (j = 0; j < (int)elf_magic->e_phnum; j++) {
-		if (phdr_load[j].p_type == PT_PHDR) {
-			auxv[i].a_un.a_val = (unsigned long)phdr_load[j].p_vaddr;
+		if (phdr_table[j].p_type == PT_PHDR) {
+			auxv[i].a_un.a_val = (unsigned long)phdr_table[j].p_vaddr;
 			break;
 		}
 	}
@@ -182,7 +146,7 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	i++;
 
 	auxv[i].a_type = AT_PAGESZ;
-	auxv[i].a_un.a_val = (unsigned long)dimensiunea_paginii;
+	auxv[i].a_un.a_val = (unsigned long)page_size;
 	i++;
 
 	auxv[i].a_type = AT_BASE;
@@ -257,14 +221,6 @@ void load_and_run(const char *filename, int argc, char **argv, char **envp)
 	memcpy(stiva, &argc, sizeof(int *));
 	void *sp = stiva;
 
-	/**
-	 *
-	 * TODO: Support Static PIE Executables
-	 * Map PT_LOAD segments at a random load base.
-	 * Adjust virtual addresses of segments and entry point by load_base.
-	 * Stack setup (argc, argv, envp, auxv) same as above.
-	 */
-	// TODO: Set the entry point and the stack pointer
 	void (*entry)() = (void (*)(void))elf_magic->e_entry;
 
 	// Transfer control
