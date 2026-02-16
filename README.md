@@ -26,7 +26,6 @@ Auxiliary Vector (auxv): Correct de-serialization of the Auxiliary Vector, provi
 Inline Assembly: Uses `__asm__` blocks to manually set the Stack Pointer (`%rsp`) and perform a jump to the binary's entry point, effectively transitioning execution control.
 
 📊 Results & Performance
-Checker Score: 80/100.
 Passed Tests: Successfully executes static, non-PIE binaries, passing all `no_pie` test cases (hello, argc, argv, envp, auxv).
 Limitation: Support for PIE (Position Independent Executables) is currently a work-in-progress.
 
